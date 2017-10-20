@@ -1,14 +1,17 @@
 import logging
 import os
 
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    level=logging.INFO)
+
+from default_tg_bot.tg_conf import init_conf
+conf = init_conf()
+
 from pony.orm import commit
 from telegram.ext import MessageHandler, Filters
 from telegram.ext import Updater, CommandHandler
 
-import telegram as tg
-from default_tg_bot.tg_conf import init_conf
 from pony import orm
-# from default_tg_bot.orm_setup import db as orm
 import default_tg_bot.orm_setup
 from default_tg_bot.orm_setup import Chat, Bookmark, Tag
 from default_tg_bot.orm_setup import WorkStateEnum
@@ -60,7 +63,7 @@ def com_handler_add_bm_get_chat(bot, update):
     print("I get chat_id: " + str(chat_id))
     chat = get_chat(chat_id, update)
 
-    chat.state = WorkStateEnum.Add_Url
+    chat.state = int(WorkStateEnum.Add_Url)
     update.message.reply_text("Please write url:")
 
 
@@ -69,7 +72,7 @@ def mid_handler_add_bm_get_url(msg, chat, update):
     bm = get_bm(chat, msg, update)
 
     update.message.reply_text("Please write (optional) name for bookmark:")
-    chat.state = WorkStateEnum.Add_Name
+    chat.state = int(WorkStateEnum.Add_Name)
     chat.current_bm = bm.url
 
 
@@ -80,7 +83,7 @@ def mid_handler_add_bm_get_name(msg, chat, update):
     bm.name = msg
 
     update.message.reply_text("Please write a lot of tags separated by spaces:")
-    chat.state = WorkStateEnum.Add_Tags
+    chat.state = int(WorkStateEnum.Add_Tags)
 
 
 @orm.db_session
@@ -103,14 +106,14 @@ def mid_handler_add_bm_add_tags(msg, chat, update):
     update.message.reply_text(str([tag.name for tag in bm.tags]))
 
     update.message.reply_text("Finish adding bookmark.")
-    chat.state = WorkStateEnum.Nothing
+    chat.state = int(WorkStateEnum.Nothing)
 
 
 command_resolver = {
-    WorkStateEnum.Nothing: lambda *args: 1,
-    WorkStateEnum.Add_Url: mid_handler_add_bm_get_url,
-    WorkStateEnum.Add_Name: mid_handler_add_bm_get_name,
-    WorkStateEnum.Add_Tags: mid_handler_add_bm_add_tags,
+    int(WorkStateEnum.Nothing): lambda *args: 1,
+    int(WorkStateEnum.Add_Url): mid_handler_add_bm_get_url,
+    int(WorkStateEnum.Add_Name): mid_handler_add_bm_get_name,
+    int(WorkStateEnum.Add_Tags): mid_handler_add_bm_add_tags,
 }
 
 
@@ -143,8 +146,9 @@ def com_handler_list(bot, update):
                + os.linesep
 
     update.message.reply_text("----------")
-    update.message.reply_text(ans)
-    update.message.reply_text("----------")
+    if ans:
+        update.message.reply_text(ans)
+        update.message.reply_text("----------")
 
 
 @orm.db_session
@@ -153,7 +157,7 @@ def com_handler_stop(bot, update):
     print("I get chat_id: " + str(chat_id))
     chat = get_chat(chat_id, update)
 
-    chat.state = WorkStateEnum.Nothing
+    chat.state = int(WorkStateEnum.Nothing)
     update.message.reply_text("Ok. All is finished.")
 
 
@@ -204,10 +208,6 @@ def start_polling(updater):
 
 
 def main():
-    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                        level=logging.INFO)
-
-    conf = init_conf()
     updater = set_up_bot(conf)
 
     # for heroku

@@ -1,3 +1,4 @@
+import os
 from enum import Enum, IntEnum, auto
 
 from pony.orm import *
@@ -7,16 +8,16 @@ db = Database()
 
 
 class WorkStateEnum(IntEnum):
-    Nothing = auto()
-    Add_Url = auto()
-    Add_Name = auto()
-    Add_Tags = auto()
+    Nothing = 0
+    Add_Url = 1
+    Add_Name = 2
+    Add_Tags = 3
 
 
 class Chat(db.Entity):
     chat_id = Required(int)
     bm = Set('Bookmark')
-    state = Required(WorkStateEnum, default=WorkStateEnum.Nothing)
+    state = Required(int, default=0)
     current_bm = Optional(str, nullable=True)
 
 
@@ -35,9 +36,16 @@ class Tag(db.Entity):
 
 sql_debug(True)
 
-# db.bind('sqlite', ':memory:')
-db.bind(provider='sqlite', filename='database.sqlite', create_db=True)
-# db.bind(provider='postgres', user='', password='', host='', database='')
+# db.bind(provider='sqlite', filename='database.sqlite', create_db=True)
 
+from urllib.parse import urlparse
+
+result = urlparse(os.environ['DATABASE_URL'])
+username = result.username
+password = result.password
+database = result.path[1:]
+hostname = result.hostname
+
+db.bind(provider='postgres', user=username, password=password, host=hostname, database=database)
 
 db.generate_mapping(create_tables=True)
