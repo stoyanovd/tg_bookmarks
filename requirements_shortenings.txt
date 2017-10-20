@@ -4,6 +4,13 @@ python-telegram-bot
 
 pyyaml
 
+pony
+
+psycopg2
+
+########################
+# old
+
 # google-api-python-client
 # langdetect
 
