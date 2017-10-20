@@ -65,9 +65,11 @@ def main():
     conf = init_conf()
     updater = set_up_bot(conf)
 
-    # start_webhooks(updater, conf)
+    # for heroku
+    start_webhooks(updater, conf)
     # OR
-    start_polling(updater)
+    # for run from your computer
+    # start_polling(updater)
 
     print("before idle")
     updater.idle()
