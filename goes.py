@@ -1,20 +1,26 @@
 import logging
 import os
 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
 
 from default_tg_bot.tg_conf import init_conf
+
 conf = init_conf()
 
 from pony.orm import commit
-from telegram.ext import MessageHandler, Filters
+from telegram.ext import MessageHandler, Filters, CallbackQueryHandler
 from telegram.ext import Updater, CommandHandler
 
 from pony import orm
 import default_tg_bot.orm_setup
 from default_tg_bot.orm_setup import Chat, Bookmark, Tag
 from default_tg_bot.orm_setup import WorkStateEnum
+
+import requests
+import bs4
 
 
 #################################################
@@ -34,7 +40,10 @@ def hello(bot, update):
 
 
 @orm.db_session
-def get_chat(chat_id, update):
+def get_chat(update):
+    chat_id = update.message.chat.id
+    print("I get chat_id: " + str(chat_id))
+
     chat = Chat.get(chat_id=chat_id)
     if not chat:
         chat = Chat(chat_id=chat_id)
@@ -45,9 +54,9 @@ def get_chat(chat_id, update):
 
 @orm.db_session
 def get_bm(chat, msg, update):
-    if Bookmark.get(url=msg):
+    if Bookmark.get(owner=chat, url=msg):
         print("I already have this link. It will be rewritten.")
-        bm = Bookmark.get(url=msg)
+        bm = Bookmark.get(owner=chat, url=msg)
         update.message.reply_text("I already have this link. It will be rewritten.")
     else:
         print("I create new bm.")
@@ -59,30 +68,48 @@ def get_bm(chat, msg, update):
 
 @orm.db_session
 def com_handler_add_bm_get_chat(bot, update):
-    chat_id = update.message.chat.id
-    print("I get chat_id: " + str(chat_id))
-    chat = get_chat(chat_id, update)
+    chat = get_chat(update)
 
     chat.state = int(WorkStateEnum.Add_Url)
     update.message.reply_text("Please write url:")
+
+
+def build_menu(buttons,
+               n_cols,
+               header_buttons=None,
+               footer_buttons=None):
+    menu = [buttons[i:i + n_cols] for i in range(0, len(buttons), n_cols)]
+    if header_buttons:
+        menu.insert(0, header_buttons)
+    if footer_buttons:
+        menu.append(footer_buttons)
+    return menu
 
 
 @orm.db_session
 def mid_handler_add_bm_get_url(msg, chat, update):
     bm = get_bm(chat, msg, update)
 
-    update.message.reply_text("Please write (optional) name for bookmark:")
+    r = requests.get(bm.url)
+    html = bs4.BeautifulSoup(r.text, "html.parser")
+    bm.name = html.title.text
+
+    button_list = [InlineKeyboardButton(bm.name, callback_data='y_' + str(chat.chat_id))]
+    reply_markup = InlineKeyboardMarkup(build_menu(button_list, n_cols=1))
+
+    update.message.reply_text("Write name for bookmark, or use hint:", reply_markup=reply_markup)
     chat.state = int(WorkStateEnum.Add_Name)
     chat.current_bm = bm.url
 
 
 @orm.db_session
-def mid_handler_add_bm_get_name(msg, chat, update):
-    bm = Bookmark.get(url=chat.current_bm)
+def mid_handler_add_bm_get_name(msg, chat, update, bot=None):
+    bm = Bookmark.get(owner=chat, url=chat.current_bm)
     assert bm
-    bm.name = msg
+    if msg and msg != 'y':
+        bm.name = msg
 
-    update.message.reply_text("Please write a lot of tags separated by spaces:")
+    bot.send_message(chat.chat_id, "Please write a lot of tags separated by spaces:")
     chat.state = int(WorkStateEnum.Add_Tags)
 
 
@@ -119,9 +146,7 @@ command_resolver = {
 
 @orm.db_session
 def all_common_messages_handler(bot, update):
-    chat_id = update.message.chat.id
-    print("I get chat_id: " + str(chat_id))
-    chat = get_chat(chat_id, update)
+    chat = get_chat(update)
 
     msg = update.message.text
 
@@ -134,9 +159,7 @@ def all_common_messages_handler(bot, update):
 
 @orm.db_session
 def com_handler_list(bot, update):
-    chat_id = update.message.chat.id
-    print("I get chat_id: " + str(chat_id))
-    chat = get_chat(chat_id, update)
+    chat = get_chat(update)
 
     ans = ""
     for bm in chat.bm:
@@ -153,11 +176,44 @@ def com_handler_list(bot, update):
 
 @orm.db_session
 def com_handler_stop(bot, update):
-    chat_id = update.message.chat.id
-    print("I get chat_id: " + str(chat_id))
-    chat = get_chat(chat_id, update)
+    chat = get_chat(update)
 
     chat.state = int(WorkStateEnum.Nothing)
+    update.message.reply_text("Ok. All is finished.")
+
+
+@orm.db_session
+def callback_handler_func(bot, update):
+    # chat = get_chat(update)
+
+    print("we in callbackHandler")
+
+    query = update.callback_query.data
+    if not query.startswith('y_'):
+        print("we in callbackHandler. str is " + query)
+        return
+    print("we in callbackHandler find 'y'")
+    chat_id = int(query[2:])
+
+    chat = Chat.get(chat_id=chat_id)
+    if not chat:
+        chat = Chat(chat_id=chat_id)
+        bot.send_message(chat_id, "Hi in new chat.")
+    commit()
+
+    mid_handler_add_bm_get_name('y', chat, update, bot)
+
+
+@orm.db_session
+def com_handler_clean_all(bot, update):
+    chat = get_chat(update)
+
+    chat.state = int(WorkStateEnum.Nothing)
+    # bms = chat.bm
+    # for bm in bms:
+    chat.bm.select(lambda x: True).delete(bulk=True)
+    # orm.delete(bm for bm in chat.bm)
+    chat.current_bm = None
     update.message.reply_text("Ok. All is finished.")
 
 
@@ -174,7 +230,9 @@ def set_up_bot(conf):
     dispatcher.add_handler(CommandHandler('hello', hello))
 
     dispatcher.add_handler(CommandHandler('add', com_handler_add_bm_get_chat))
+    dispatcher.add_handler(CallbackQueryHandler(callback_handler_func))
 
+    dispatcher.add_handler(CommandHandler('clean_all', com_handler_clean_all))
     dispatcher.add_handler(CommandHandler('stop', com_handler_stop))
     dispatcher.add_handler(CommandHandler('list', com_handler_list))
 
@@ -189,10 +247,14 @@ def set_up_bot(conf):
 """
 hello - Test it works
 add - Add new bookmark
+clean_all - Clean all bookmarks
 stop - Stop asking for details and finish
 list - List all bookmarks
 """
 
+
+# TODO nice Finite State Machine (FSM) library:
+# https://github.com/pytransitions/transitions
 
 #################################################
 

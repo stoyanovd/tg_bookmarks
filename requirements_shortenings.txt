@@ -8,6 +8,8 @@ pony
 
 psycopg2
 
+beautifulsoup4
+
 ########################
 # old
 
